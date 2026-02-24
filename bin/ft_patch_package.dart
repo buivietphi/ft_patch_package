@@ -4,7 +4,7 @@ import 'package:ft_patch_package/src/applier.dart';
 import 'package:ft_patch_package/src/console.dart';
 import 'package:ft_patch_package/src/patcher.dart';
 
-Future<void> main(List<String> args) async {
+void main(List<String> args) {
   if (args.isEmpty) {
     _printUsage();
     exit(1);
@@ -20,7 +20,8 @@ Future<void> main(List<String> args) async {
         _printUsage();
         exit(1);
       }
-      await Patcher().start(packageName);
+      final startOk = Patcher().start(packageName);
+      if (!startOk) exit(1);
 
     case 'done':
       if (packageName == null) {
@@ -28,10 +29,12 @@ Future<void> main(List<String> args) async {
         _printUsage();
         exit(1);
       }
-      await Patcher().done(packageName);
+      final doneOk = Patcher().done(packageName);
+      if (!doneOk) exit(1);
 
     case 'apply':
-      await Applier().apply();
+      final applyOk = Applier().apply();
+      if (!applyOk) exit(1);
 
     default:
       Console.error('Unknown command: $command');

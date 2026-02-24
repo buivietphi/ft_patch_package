@@ -3,16 +3,24 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'console.dart';
+import 'dart_patch.dart';
 import 'package_resolver.dart';
 
 /// Applies all patches from the `patches/` directory to .pub-cache packages.
 class Applier {
   /// Scans `patches/` for `.patch` files and applies them.
-  Future<void> apply() async {
-    final patchesDir = Directory('patches');
+  /// Returns `true` if all patches succeeded (or were skipped).
+  bool apply() {
+    final projectRoot = PackageResolver.findProjectRoot();
+    if (projectRoot == null) {
+      Console.error('Could not find project root (no pubspec.yaml found).');
+      return false;
+    }
+
+    final patchesDir = Directory(p.join(projectRoot, 'patches'));
     if (!patchesDir.existsSync()) {
       Console.warn('No patches/ directory found. Nothing to apply.');
-      return;
+      return true;
     }
 
     final patchFiles = patchesDir
@@ -23,7 +31,7 @@ class Applier {
 
     if (patchFiles.isEmpty) {
       Console.warn('No .patch files found in patches/.');
-      return;
+      return true;
     }
 
     var applied = 0;
@@ -68,56 +76,29 @@ class Applier {
         continue;
       }
 
-      final absolutePatchPath = patchFile.absolute.path;
+      final patchContent = patchFile.readAsStringSync();
 
-      // Check if already applied (reverse dry-run succeeds = already applied)
-      final reverseCheck = await Process.run('patch', [
-        '-d', packageDir,
-        '-p1',
-        '--dry-run',
-        '--reverse',
-        '--force',
-        '-i', absolutePatchPath,
-      ]);
-
-      if (reverseCheck.exitCode == 0) {
+      // Check if already applied (reverse dry-run)
+      if (DartPatch.isApplied(packageDir, patchContent)) {
         Console.info('$filename: already applied, skipping.');
         skipped++;
         continue;
       }
 
       // Check if applicable (forward dry-run)
-      final forwardCheck = await Process.run('patch', [
-        '-d', packageDir,
-        '-p1',
-        '--dry-run',
-        '--forward',
-        '-i', absolutePatchPath,
-      ]);
-
-      if (forwardCheck.exitCode != 0) {
-        Console.error(
-            '$filename: cannot apply patch.\n'
-            '  ${forwardCheck.stderr.toString().trim()}');
+      if (!DartPatch.isApplicable(packageDir, patchContent)) {
+        Console.error('$filename: cannot apply patch (content mismatch).');
         failed++;
         continue;
       }
 
       // Apply the patch
-      final result = await Process.run('patch', [
-        '-d', packageDir,
-        '-p1',
-        '--forward',
-        '-i', absolutePatchPath,
-      ]);
-
-      if (result.exitCode == 0) {
+      final error = DartPatch.apply(packageDir, patchContent);
+      if (error == null) {
         Console.success('$filename: applied successfully.');
         applied++;
       } else {
-        Console.error(
-            '$filename: failed to apply.\n'
-            '  ${result.stderr.toString().trim()}');
+        Console.error('$filename: failed to apply.\n  $error');
         failed++;
       }
     }
@@ -131,5 +112,6 @@ class Applier {
       Console.warn(
           'Done. $applied applied, $skipped skipped, $failed failed.');
     }
+    return failed == 0;
   }
 }

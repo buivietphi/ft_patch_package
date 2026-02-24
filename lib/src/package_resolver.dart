@@ -4,6 +4,20 @@ import 'package:path/path.dart' as p;
 
 /// Resolves package locations within the .pub-cache directory.
 class PackageResolver {
+  /// Finds the project root by walking up from the current directory
+  /// looking for pubspec.yaml.
+  static String? findProjectRoot() {
+    var dir = Directory.current;
+    while (true) {
+      if (File(p.join(dir.path, 'pubspec.yaml')).existsSync()) {
+        return dir.path;
+      }
+      final parent = dir.parent;
+      if (parent.path == dir.path) return null;
+      dir = parent;
+    }
+  }
+
   /// Finds the .pub-cache directory for the current platform.
   static String? findPubCacheDir() {
     // Check PUB_CACHE environment variable first
@@ -77,8 +91,8 @@ class PackageResolver {
 
     if (matches.isEmpty) return null;
 
-    // Sort by version string descending to get latest
-    matches.sort((a, b) => b.version.compareTo(a.version));
+    // Sort by semantic version descending to get latest
+    matches.sort((a, b) => _compareVersions(b.version, a.version));
     return matches.first;
   }
 
@@ -92,6 +106,21 @@ class PackageResolver {
       return dirName.substring(prefix.length);
     }
     return null;
+  }
+
+  /// Compares two version strings semantically.
+  /// Returns negative if a < b, zero if equal, positive if a > b.
+  static int _compareVersions(String a, String b) {
+    final aParts = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final bParts = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final maxLen =
+        aParts.length > bParts.length ? aParts.length : bParts.length;
+    for (var i = 0; i < maxLen; i++) {
+      final aVal = i < aParts.length ? aParts[i] : 0;
+      final bVal = i < bParts.length ? bParts[i] : 0;
+      if (aVal != bVal) return aVal.compareTo(bVal);
+    }
+    return 0;
   }
 
   /// Parses a patch filename like `health+13.3.1.patch` into name and version.

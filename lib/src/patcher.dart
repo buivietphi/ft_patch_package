@@ -3,24 +3,29 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'console.dart';
-import 'diff_normalizer.dart';
+import 'dart_diff.dart';
 import 'package_resolver.dart';
 
 /// Handles the `start` and `done` commands for creating patches.
 class Patcher {
-  static const _tempSubDir = 'ft_patch_package';
-
   /// Creates a snapshot of [packageName] from .pub-cache for later diffing.
-  Future<void> start(String packageName) async {
+  /// Returns `true` on success.
+  bool start(String packageName) {
+    final projectRoot = PackageResolver.findProjectRoot();
+    if (projectRoot == null) {
+      Console.error('Could not find project root (no pubspec.yaml found).');
+      return false;
+    }
+
     final resolved = PackageResolver.resolvePackageAny(packageName);
     if (resolved == null) {
       Console.error(
           'Package "$packageName" not found in .pub-cache. '
           'Run "flutter pub get" first.');
-      return;
+      return false;
     }
 
-    final snapshotDir = _snapshotPath(packageName, resolved.version);
+    final snapshotDir = _snapshotPath(projectRoot, packageName, resolved.version);
     final snapshot = Directory(snapshotDir);
 
     if (snapshot.existsSync()) {
@@ -28,30 +33,39 @@ class Patcher {
     }
     snapshot.createSync(recursive: true);
 
-    await _copyDirectory(Directory(resolved.path), snapshot);
+    _copyDirectory(Directory(resolved.path), snapshot);
 
     Console.success(
         'Snapshot saved for $packageName@${resolved.version}');
     Console.info(
         'Now edit the package in .pub-cache, then run: '
         'dart run ft_patch_package done $packageName');
+    return true;
   }
 
   /// Generates a patch by diffing the snapshot against the current .pub-cache.
-  Future<void> done(String packageName) async {
+  /// Returns `true` on success.
+  bool done(String packageName) {
+    final projectRoot = PackageResolver.findProjectRoot();
+    if (projectRoot == null) {
+      Console.error('Could not find project root (no pubspec.yaml found).');
+      return false;
+    }
+
     // Find the snapshot
-    final tempBase = p.join(Directory.systemTemp.path, _tempSubDir);
-    final tempDir = Directory(tempBase);
-    if (!tempDir.existsSync()) {
+    final snapshotBase = p.join(
+        projectRoot, '.dart_tool', 'ft_patch_package');
+    final snapshotBaseDir = Directory(snapshotBase);
+    if (!snapshotBaseDir.existsSync()) {
       Console.error(
           'No snapshot found. Run "dart run ft_patch_package start $packageName" first.');
-      return;
+      return false;
     }
 
     // Find snapshot directory (name-version format)
     Directory? snapshotDir;
     String? version;
-    for (final dir in tempDir.listSync().whereType<Directory>()) {
+    for (final dir in snapshotBaseDir.listSync().whereType<Directory>()) {
       final dirName = p.basename(dir.path);
       if (dirName.startsWith('$packageName-')) {
         snapshotDir = dir;
@@ -63,7 +77,7 @@ class Patcher {
     if (snapshotDir == null || version == null) {
       Console.error(
           'Snapshot for "$packageName" not found. Did you run start first?');
-      return;
+      return false;
     }
 
     // Find current package in .pub-cache
@@ -71,39 +85,28 @@ class Patcher {
     if (currentPath == null) {
       Console.error(
           '$packageName@$version not found in .pub-cache.');
-      return;
+      return false;
     }
 
-    // Generate diff
+    // Generate diff using pure Dart (no external commands needed)
     Console.info('Generating diff for $packageName@$version...');
-    final result = await Process.run(
-      'diff',
-      ['-ruN', snapshotDir.path, currentPath],
-    );
+    final diffOutput = DartDiff.diffDirectories(snapshotDir.path, currentPath);
 
-    final diffOutput = result.stdout.toString();
     if (diffOutput.isEmpty) {
       Console.warn('No changes detected for $packageName. No patch created.');
       _cleanupSnapshot(snapshotDir);
-      return;
+      return true;
     }
-
-    // Normalize paths to portable a/ b/ format
-    final normalizedDiff = DiffNormalizer.normalize(
-      diffOutput,
-      snapshotDir.path,
-      currentPath,
-    );
 
     // Write patch file
     final patchFileName = '$packageName+$version.patch';
-    final patchesDir = Directory('patches');
+    final patchesDir = Directory(p.join(projectRoot, 'patches'));
     if (!patchesDir.existsSync()) {
       patchesDir.createSync(recursive: true);
     }
 
-    final patchFile = File(p.join('patches', patchFileName));
-    patchFile.writeAsStringSync(normalizedDiff);
+    final patchFile = File(p.join(patchesDir.path, patchFileName));
+    patchFile.writeAsStringSync(diffOutput);
 
     // Cleanup snapshot
     _cleanupSnapshot(snapshotDir);
@@ -112,12 +115,14 @@ class Patcher {
     Console.info(
         'Commit patches/ to version control. '
         'Apply with: dart run ft_patch_package apply');
+    return true;
   }
 
-  String _snapshotPath(String packageName, String version) {
+  String _snapshotPath(String projectRoot, String packageName, String version) {
     return p.join(
-      Directory.systemTemp.path,
-      _tempSubDir,
+      projectRoot,
+      '.dart_tool',
+      'ft_patch_package',
       '$packageName-$version',
     );
   }
@@ -133,15 +138,22 @@ class Patcher {
     } catch (_) {}
   }
 
-  Future<void> _copyDirectory(Directory source, Directory dest) async {
-    for (final entity in source.listSync(recursive: false)) {
+  void _copyDirectory(Directory source, Directory dest) {
+    for (final entity in source.listSync(recursive: false, followLinks: false)) {
       final newPath = p.join(dest.path, p.basename(entity.path));
-      if (entity is Directory) {
-        final newDir = Directory(newPath);
-        newDir.createSync();
-        await _copyDirectory(entity, newDir);
-      } else if (entity is File) {
-        entity.copySync(newPath);
+      try {
+        if (entity is Link) {
+          // Recreate symlink with the same target
+          Link(newPath).createSync(entity.targetSync());
+        } else if (entity is Directory) {
+          final newDir = Directory(newPath);
+          newDir.createSync();
+          _copyDirectory(entity, newDir);
+        } else if (entity is File) {
+          entity.copySync(newPath);
+        }
+      } catch (e) {
+        Console.warn('Failed to copy ${p.basename(entity.path)}: $e');
       }
     }
   }

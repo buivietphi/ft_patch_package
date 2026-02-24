@@ -92,11 +92,12 @@ Paths inside patch files use portable `a/` and `b/` prefixes (no machine-specifi
 | Issue | patch_package | ft_patch_package |
 |-------|--------------|-----------------|
 | Portable paths | Machine-specific absolute paths | `a/` `b/` relative paths |
-| Async handling | `void async` (process exits early) | `Future<void>` with await |
+| External commands | Requires `diff` and `patch` CLI tools | Pure Dart — no external dependencies |
 | Version matching | First regex match (wrong version) | Exact version from filename |
-| Apply path bug | Relative `-i` path fails with `-d` | Absolute path for `-i` |
+| Cross-platform | Fails on Windows without GNU tools | Works on Windows, macOS, Linux |
 | Terminal output | `developer.log()` (invisible) | `print()` with colors |
 | Idempotent apply | Fails on re-apply | Detects and skips |
+| Security | No path validation | Path traversal prevention |
 
 ## License
 
