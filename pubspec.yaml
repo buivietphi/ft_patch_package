@@ -1,10 +1,17 @@
 name: ft_patch_package
 description: >-
   Patch Flutter & Dart packages like React Native's patch-package.
-  Create portable patches, store in version control, apply after pub get.
+  Create, store, and auto-apply patches to pub dependencies after pub get.
+  Fix bugs in third-party packages without forking.
 version: 1.0.0
 homepage: https://github.com/buivietphi/ft_patch_package
 repository: https://github.com/buivietphi/ft_patch_package
+topics:
+  - patch
+  - patch-package
+  - diff
+  - dependency-management
+  - cli
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
