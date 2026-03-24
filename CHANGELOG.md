@@ -1,3 +1,7 @@
+## 1.0.1
+
+- Improve pub.dev discoverability with topics and better description
+
 ## 1.0.0
 
 - Initial release
